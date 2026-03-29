@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>復号化</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f3f4f6; }
+        .login-box { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 100%; max-width: 480px; text-align: center; }
+        h1 { margin-top: 0; font-size: 1.25rem; color: #111827; margin-bottom: 0.5rem; }
+        p { color: #6b7280; font-size: 0.875rem; margin-bottom: 1.5rem; }
+        .field { text-align: left; margin-bottom: 1rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
+        input { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
+        input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+        button { width: 100%; padding: 0.75rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 1rem; transition: background 0.2s; }
+        button:hover { background: #1d4ed8; }
+        #message { color: #ef4444; margin-top: 1rem; font-size: 0.875rem; min-height: 1.25rem; }
+    </style>
+</head>
+<body>
+    <div class="login-box" id="login-form">
+        <h1>アプリの保護</h1>
+        <p>続行するには認証情報を入力してください。</p>
+        <div class="field">
+            <label for="password">パスワード</label>
+            <input type="password" id="password" placeholder="アプリのパスワード" autofocus>
+        </div>
+        <div class="field">
+            <label for="github_pat">GitHub Personal Access Token</label>
+            <input type="password" id="github_pat" placeholder="github_pat_...">
+        </div>
+        <button id="unlock-btn">ロックを解除</button>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        const btn = document.getElementById('unlock-btn');
+        const passInput = document.getElementById('password');
+        const patInput = document.getElementById('github_pat');
+        const message = document.getElementById('message');
+
+        async function unlock() {
+            const password = passInput.value;
+            const pat = patInput.value;
+            if (!password || !pat) {
+                message.textContent = 'パスワードとGitHub PATの両方を入力してください。';
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '復号中...';
+            message.textContent = '';
+
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.register('sw.js?t=' + Date.now());
+                    await registration.update();
+
+                    let sw = registration.installing || registration.waiting || registration.active;
+                    if (sw.state !== 'activated') {
+                        await new Promise((resolve) => {
+                            sw.addEventListener('statechange', (e) => {
+                                if (e.target.state === 'activated') resolve();
+                            });
+                        });
+                    }
+                    
+                    if (!navigator.serviceWorker.controller) {
+                        location.reload();
+                        return;
+                    }
+
+                    const channel = new MessageChannel();
+                    channel.port1.onmessage = (event) => {
+                        if (event.data.success) {
+                            message.style.color = 'green';
+                            message.textContent = '成功しました。読み込んでいます...';
+                            localStorage.setItem('app_password', password);
+                            localStorage.setItem('github_pat', pat);
+                            location.reload(); 
+                        } else {
+                            btn.disabled = false;
+                            btn.textContent = 'ロックを解除';
+                            message.style.color = '#ef4444';
+                            message.textContent = event.data.error;
+                        }
+                    };
+
+                    navigator.serviceWorker.controller.postMessage(
+                        { type: 'SET_PASSWORD', password: password },
+                        [channel.port2]
+                    );
+                } catch (e) {
+                    btn.disabled = false;
+                    btn.textContent = 'ロックを解除';
+                    message.textContent = 'エラー: ' + e.message;
+                }
+            } else {
+                message.textContent = 'お使いのブラウザはService Workerをサポートしていません。';
+            }
+        }
+
+        btn.onclick = unlock;
+        [passInput, patInput].forEach(el => {
+            el.onkeypress = (e) => { if (e.key === 'Enter') unlock(); };
+        });
+
+        window.addEventListener('load', async () => {
+            const savedPassword = localStorage.getItem('app_password');
+            const savedPat = localStorage.getItem('github_pat');
+            if (savedPassword && savedPat && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                passInput.value = savedPassword;
+                patInput.value = savedPat;
+                unlock();
+            }
+        });
+    </script>
+</body>
+</html>
